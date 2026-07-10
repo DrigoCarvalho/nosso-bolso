@@ -239,6 +239,11 @@ nav button svg{width:22px;height:22px}
     <div class="fld"><label>Quem gastou</label>
       <select id="gQuem"><option>Casal</option><option>Rodrigo</option><option>Laura</option></select></div>
   </div>
+  <div class="fld"><label>Método de pagamento</label>
+    <div class="chips" id="gPag">
+      <button class="chip" data-pag="Vale/Ticket">🎟️ Vale/Ticket</button>
+      <button class="chip" data-pag="Outros">Outros</button>
+    </div></div>
   <button class="btn" id="gSalvar">Salvar gasto</button>
 </div>
 
@@ -264,9 +269,15 @@ const hoje = () => { const d = new Date();
 
 let cfg = { url: LS.getItem('nb_url'), pin: LS.getItem('nb_pin'), quem: LS.getItem('nb_quem') };
 let mesAtual = hoje().slice(0,7);
-let dados = null;           // {categorias, gastos}
+let dados = null;           // {categorias, gastos, config}
 let catSelecionada = null;
+let pagSelecionado = 'Outros';
+let editandoId = null;      // id do gasto em edição (null = novo gasto)
 let snapshotPct = {};       // % por categoria antes do último lançamento (p/ alertas)
+
+// Médias por ida (análise do extrato do vale, 60 dias — mai-jul/2026).
+// Peça ao Claude para recalibrar com um extrato novo quando quiser.
+const MEDIA_IDA = { mercado: 129, restaurante: 120 };
 
 /* ================= api ================= */
 async function api(payload, {silent=false} = {}) {
@@ -396,9 +407,63 @@ function renderResumo() {
       <div class="gangorra-legenda"><span>← estouros ${fmt(a.estouro)}</span><span>sobras ${fmt(a.sobra)} →</span></div>
       <div class="analise">${a.frase}</div>
     </div>
+    ${renderTicketCard()}
     <div class="pessoas">${pessoas}</div>
     <h2 class="sec">Categorias</h2>
     ${catsHtml || '<div class="vazio">Nenhuma categoria ativa.</div>'}`;
+
+  const btnST = $('#btnSaldoTicket');
+  if (btnST) btnST.onclick = editarSaldoTicket;
+}
+
+function renderTicketCard() {
+  const config = dados.config || {};
+  if (config.ticketSaldo === undefined) {
+    return `<div class="balanco"><div class="eyebrow">Saldo dos tickets</div>
+      <div class="analise" style="margin-top:10px">Atualize o <b>Code.gs</b> no Apps Script e rode o <b>setup</b> para ativar este card.</div></div>`;
+  }
+  const saldo = Number(config.ticketSaldo) || 0;
+  const gastoVale = dados.gastos.filter(g => g.pagamento === 'Vale/Ticket')
+    .reduce((s,g) => s + g.valor, 0);
+  const restante = saldo - gastoVale;
+  const pct = saldo > 0 ? Math.min((gastoVale/saldo)*100, 100) : 0;
+  const cls = restante < 0 ? 'w100' : pct >= 80 ? 'w80' : 'ok';
+
+  let aviso;
+  if (restante > 0) {
+    const idasM = Math.floor(restante / MEDIA_IDA.mercado);
+    const idasR = Math.floor(restante / MEDIA_IDA.restaurante);
+    aviso = `Com o que resta, o vale ainda banca <b class="azul">~${idasM} ${idasM===1?'compra':'compras'} de mercado</b> (média de ${fmt(MEDIA_IDA.mercado)} por ida) <b>ou</b> <b class="azul">~${idasR} ${idasR===1?'ida':'idas'} a restaurante/delivery</b> (média de ${fmt(MEDIA_IDA.restaurante)}).`;
+  } else if (gastoVale === 0) {
+    aviso = `Nenhum gasto no vale este mês. O saldo inteiro dá para <b class="azul">~${Math.floor(saldo/MEDIA_IDA.mercado)} compras de mercado</b> ou <b class="azul">~${Math.floor(saldo/MEDIA_IDA.restaurante)} idas a restaurante</b>.`;
+  } else {
+    aviso = `O vale do mês acabou — <b class="verm">${fmt(-restante)}</b> já saíram além do saldo (esse excedente veio do bolso de vocês).`;
+  }
+
+  return `<div class="balanco">
+    <div class="cat-top">
+      <div class="eyebrow">🎟️ Saldo dos tickets</div>
+      <button id="btnSaldoTicket" style="font-size:12px;font-weight:700;color:var(--azul)">editar saldo ✏️</button>
+    </div>
+    <div class="verdict ${restante>=0?'azul':'verm'}" style="font-size:24px">${fmt(Math.max(restante,0))} ${restante>=0?'disponíveis':''}</div>
+    <div class="sub">${fmt(gastoVale)} usados de ${fmt(saldo)}</div>
+    <div class="bar" style="margin-top:12px"><i class="${cls}" style="width:${pct}%"></i></div>
+    <div class="analise" style="margin-top:10px">${aviso}</div>
+  </div>`;
+}
+
+async function editarSaldoTicket() {
+  const atual = Number((dados.config||{}).ticketSaldo) || 0;
+  const novo = prompt('Novo saldo total dos tickets (R$):',
+    atual.toLocaleString('pt-BR',{minimumFractionDigits:2}));
+  if (novo === null) return;
+  const v = parseValor(novo);
+  if (v < 0) return toast('Valor inválido','warn');
+  try {
+    await api({action:'setConfig', chave:'ticketSaldo', valor:v});
+    toast('Saldo dos tickets atualizado para '+fmt(v));
+    await carregar({silent:true});
+  } catch(e){ toast(e.message,'bad'); }
 }
 
 function renderHistorico() {
@@ -411,7 +476,8 @@ function renderHistorico() {
     return `<h2 class="sec" style="text-transform:capitalize">${lbl}</h2>` + porDia[d].map(g => `
       <div class="gasto">
         <div class="quem-dot ${g.quem==='Rodrigo'?'dot-a':g.quem==='Laura'?'dot-b':'dot-c'}">${(g.quem||'?')[0]}</div>
-        <div class="info"><div class="l1">${g.categoria}</div>
+        <div class="info" data-edit="${g.id}" style="cursor:pointer">
+          <div class="l1">${g.pagamento==='Vale/Ticket'?'🎟️ ':''}${g.categoria}</div>
           <div class="l2">${g.descricao || g.quem}</div></div>
         <div class="valor">${fmt(g.valor)}</div>
         <button class="del" data-del="${g.id}" aria-label="Excluir">✕</button>
@@ -422,6 +488,10 @@ function renderHistorico() {
     if (!confirm('Excluir este gasto?')) return;
     try { await api({action:'deleteExpense', id:b.dataset.del}); toast('Gasto excluído'); await carregar({silent:true}); }
     catch(e){ toast(e.message,'bad'); }
+  });
+  $('#viewHistorico').querySelectorAll('[data-edit]').forEach(el => el.onclick = () => {
+    const g = dados.gastos.find(x => x.id === el.dataset.edit);
+    if (g) abrirEdicao(g);
   });
 }
 
@@ -459,6 +529,20 @@ function quemPadrao(){
   return 'Casal';
 }
 
+// Padrão de pagamento: mercado e restaurante/delivery costumam sair do vale
+function pagPadrao(){
+  const c = (catSelecionada||'').toLowerCase();
+  return (c.includes('mercado') || c.includes('delivery') || c.includes('restaurante'))
+    ? 'Vale/Ticket' : 'Outros';
+}
+
+function renderPagChips(){
+  $('#gPag').querySelectorAll('.chip').forEach(ch => {
+    ch.classList.toggle('on', ch.dataset.pag === pagSelecionado);
+    ch.onclick = () => { pagSelecionado = ch.dataset.pag; renderPagChips(); };
+  });
+}
+
 function renderChips() {
   const cats = dados.categorias.filter(c=>!c.arquivada);
   $('#gCats').innerHTML = cats.map(c =>
@@ -466,6 +550,7 @@ function renderChips() {
   $('#gCats').querySelectorAll('.chip').forEach(ch => ch.onclick = () => {
     catSelecionada = ch.dataset.chip; renderChips();
     $('#gQuem').value = quemPadrao();
+    pagSelecionado = pagPadrao(); renderPagChips();
   });
 }
 
@@ -484,6 +569,29 @@ function parseValor(s){
   return parseFloat(s) || 0;
 }
 
+function novoGasto() {
+  editandoId = null;
+  $('#gValor').value = ''; $('#gDesc').value = '';
+  pagSelecionado = pagPadrao(); renderPagChips(); renderChips();
+  $('#sheetGasto h3').textContent = 'Registrar gasto';
+  $('#gSalvar').textContent = 'Salvar gasto';
+  abrirSheet('sheetGasto');
+}
+
+function abrirEdicao(g) {
+  editandoId = g.id;
+  catSelecionada = g.categoria;
+  pagSelecionado = g.pagamento || 'Outros';
+  renderChips(); renderPagChips();
+  $('#sheetGasto h3').textContent = 'Editar gasto';
+  $('#gSalvar').textContent = 'Salvar alterações';
+  abrirSheet('sheetGasto');
+  $('#gValor').value = g.valor.toLocaleString('pt-BR',{minimumFractionDigits:2});
+  $('#gDesc').value = g.descricao || '';
+  $('#gData').value = g.data;
+  $('#gQuem').value = g.quem;
+}
+
 async function salvarGasto() {
   const valor = parseValor($('#gValor').value);
   if (!valor || valor <= 0) return toast('Informe o valor', 'warn');
@@ -492,14 +600,27 @@ async function salvarGasto() {
   snapshotPct = {};
   r.lista.forEach(c => snapshotPct[c.nome] = c.limite>0 ? c.gasto/c.limite : 0);
 
+  const payload = {
+    categoria: catSelecionada, valor, quem: $('#gQuem').value,
+    descricao: $('#gDesc').value.trim(), data: $('#gData').value || hoje(),
+    pagamento: pagSelecionado
+  };
+
   $('#gSalvar').disabled = true;
   try {
-    await api({ action:'addExpense', categoria:catSelecionada, valor,
-      quem:$('#gQuem').value, descricao:$('#gDesc').value.trim(), data:$('#gData').value || hoje() });
-    fecharSheets();
+    if (editandoId) {
+      await api({ action:'updateExpense', id: editandoId, ...payload });
+      fecharSheets();
+      await carregar({silent:true});
+      toast('Gasto atualizado ✓');
+    } else {
+      await api({ action:'addExpense', ...payload });
+      fecharSheets();
+      await carregar({silent:true});
+      alertaAposGasto(valor);
+    }
+    editandoId = null;
     $('#gValor').value = ''; $('#gDesc').value = '';
-    await carregar({silent:true});
-    alertaAposGasto(valor);
   } catch(e){ toast(e.message,'bad'); }
   $('#gSalvar').disabled = false;
 }
@@ -541,7 +662,7 @@ function toast(msg, tipo) {
 function abrirSheet(id){
   $('#ovl').classList.remove('hidden');
   requestAnimationFrame(()=>{ $('#ovl').classList.add('show'); $('#'+id).classList.add('show'); });
-  if (id==='sheetGasto'){ $('#gData').value = hoje(); $('#gQuem').value = quemPadrao(); }
+  if (id==='sheetGasto' && !editandoId){ $('#gData').value = hoje(); $('#gQuem').value = quemPadrao(); }
 }
 function fecharSheets(){
   $('#ovl').classList.remove('show');
@@ -602,8 +723,9 @@ function iniciarApp(){
 
 $('#btnCfg').onclick = () => abrirSetup();
 
-$('#fabAdd').onclick = () => abrirSheet('sheetGasto');
+$('#fabAdd').onclick = novoGasto;
 $('#ovl').onclick = fecharSheets;
+renderPagChips();
 $('#gSalvar').onclick = salvarGasto;
 $('#cSalvar').onclick = criarCategoria;
 $('#tabResumo').onclick = () => trocarTab('Resumo');
