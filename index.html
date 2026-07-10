@@ -36,6 +36,8 @@ header{background:var(--ink);color:#fff;padding:calc(env(safe-area-inset-top) + 
 .month-nav button{width:32px;height:32px;border-radius:99px;color:#fff;font-size:17px;display:grid;place-items:center}
 .month-nav button:active{background:rgba(255,255,255,.18)}
 #monthLabel{font-size:13.5px;font-weight:600;min-width:96px;text-align:center;text-transform:capitalize}
+.gear{width:34px;height:34px;border-radius:99px;background:rgba(255,255,255,.1);color:#fff;font-size:15px;display:grid;place-items:center}
+.gear:active{background:rgba(255,255,255,.2)}
 
 main{max-width:520px;margin:0 auto;padding:16px 16px 110px}
 
@@ -89,6 +91,7 @@ h2.sec{font-family:var(--display);font-size:15px;font-weight:700;margin:18px 4px
 .gasto .quem-dot{width:34px;height:34px;border-radius:99px;display:grid;place-items:center;
   font-family:var(--display);font-weight:800;font-size:14px;flex-shrink:0;color:#fff}
 .dot-a{background:var(--azul)} .dot-b{background:var(--ink)}
+.dot-c{background:linear-gradient(90deg,var(--azul) 50%,var(--ink) 50%)}
 .gasto .info{flex:1;min-width:0}
 .gasto .l1{font-size:14px;font-weight:600}
 .gasto .l2{font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -190,10 +193,13 @@ nav button svg{width:22px;height:22px}
 <div id="app" class="hidden">
   <header>
     <div class="brand">Nosso <span>Bolso</span></div>
-    <div class="month-nav">
-      <button id="mPrev" aria-label="Mês anterior">‹</button>
-      <div id="monthLabel"></div>
-      <button id="mNext" aria-label="Próximo mês">›</button>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div class="month-nav">
+        <button id="mPrev" aria-label="Mês anterior">‹</button>
+        <div id="monthLabel"></div>
+        <button id="mNext" aria-label="Próximo mês">›</button>
+      </div>
+      <button id="btnCfg" class="gear" aria-label="Ajustes de conexão">⚙</button>
     </div>
   </header>
 
@@ -231,7 +237,7 @@ nav button svg{width:22px;height:22px}
   <div class="duo">
     <div class="fld"><label>Data</label><input id="gData" type="date"></div>
     <div class="fld"><label>Quem gastou</label>
-      <select id="gQuem"><option>Rodrigo</option><option>Laura</option></select></div>
+      <select id="gQuem"><option>Casal</option><option>Rodrigo</option><option>Laura</option></select></div>
   </div>
   <button class="btn" id="gSalvar">Salvar gasto</button>
 </div>
@@ -286,6 +292,10 @@ async function carregar({silent=false} = {}) {
     LS.setItem('nb_cache_'+mesAtual, JSON.stringify(j));
     $('#offlineTag').classList.add('hidden');
   } catch (e) {
+    if (e.message === 'PIN incorreto') {
+      abrirSetup('O PIN não confere com o servidor — informe o PIN atual para continuar.');
+      return;
+    }
     const cache = LS.getItem('nb_cache_'+mesAtual);
     if (cache) { dados = JSON.parse(cache); $('#offlineTag').classList.remove('hidden'); }
     else { dados = null; toast('Não foi possível carregar: '+e.message, 'bad'); }
@@ -371,7 +381,7 @@ function renderResumo() {
       ${rodape}</div>`;
   }).join('');
 
-  const pessoas = ['Rodrigo','Laura'].map((p,i) =>
+  const pessoas = ['Casal','Rodrigo','Laura'].map(p =>
     `<div class="pessoa"><div class="nome">${p}</div><div class="val">${fmt(r.porPessoa[p]||0)}</div></div>`).join('');
 
   $('#viewResumo').innerHTML = `
@@ -400,7 +410,7 @@ function renderHistorico() {
     const lbl = dt.toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit',month:'short'});
     return `<h2 class="sec" style="text-transform:capitalize">${lbl}</h2>` + porDia[d].map(g => `
       <div class="gasto">
-        <div class="quem-dot ${g.quem==='Rodrigo'?'dot-a':'dot-b'}">${(g.quem||'?')[0]}</div>
+        <div class="quem-dot ${g.quem==='Rodrigo'?'dot-a':g.quem==='Laura'?'dot-b':'dot-c'}">${(g.quem||'?')[0]}</div>
         <div class="info"><div class="l1">${g.categoria}</div>
           <div class="l2">${g.descricao || g.quem}</div></div>
         <div class="valor">${fmt(g.valor)}</div>
@@ -442,12 +452,20 @@ function renderCategorias() {
   $('#btnNovaCat').onclick = () => abrirSheet('sheetCat');
 }
 
+function quemPadrao(){
+  const c = (catSelecionada||'').toLowerCase();
+  if (c.includes('pessoais') && c.includes('rodrigo')) return 'Rodrigo';
+  if (c.includes('pessoais') && c.includes('laura')) return 'Laura';
+  return 'Casal';
+}
+
 function renderChips() {
   const cats = dados.categorias.filter(c=>!c.arquivada);
   $('#gCats').innerHTML = cats.map(c =>
     `<button class="chip ${c.nome===catSelecionada?'on':''}" data-chip="${c.nome}">${c.nome}</button>`).join('');
   $('#gCats').querySelectorAll('.chip').forEach(ch => ch.onclick = () => {
     catSelecionada = ch.dataset.chip; renderChips();
+    $('#gQuem').value = quemPadrao();
   });
 }
 
@@ -523,7 +541,7 @@ function toast(msg, tipo) {
 function abrirSheet(id){
   $('#ovl').classList.remove('hidden');
   requestAnimationFrame(()=>{ $('#ovl').classList.add('show'); $('#'+id).classList.add('show'); });
-  if (id==='sheetGasto'){ $('#gData').value = hoje(); $('#gQuem').value = cfg.quem; }
+  if (id==='sheetGasto'){ $('#gData').value = hoje(); $('#gQuem').value = quemPadrao(); }
 }
 function fecharSheets(){
   $('#ovl').classList.remove('show');
@@ -563,11 +581,26 @@ $('#btnEntrar').onclick = async () => {
 };
 
 /* ================= boot ================= */
+function abrirSetup(msg){
+  $('#app').classList.add('hidden');
+  $('#viewSetup').classList.remove('hidden');
+  $('#inUrl').value = cfg.url || '';
+  $('#inPin').value = '';
+  if (cfg.quem){
+    whoSel = cfg.quem;
+    document.querySelectorAll('.who button').forEach(x =>
+      x.classList.toggle('on', x.dataset.who === cfg.quem));
+  }
+  $('#setupErr').textContent = msg || '';
+}
+
 function iniciarApp(){
   $('#viewSetup').classList.add('hidden');
   $('#app').classList.remove('hidden');
   renderMes(); carregar();
 }
+
+$('#btnCfg').onclick = () => abrirSetup();
 
 $('#fabAdd').onclick = () => abrirSheet('sheetGasto');
 $('#ovl').onclick = fecharSheets;
