@@ -253,7 +253,8 @@ nav button svg{width:22px;height:22px}
 const $ = s => document.querySelector(s);
 const LS = localStorage;
 const fmt = v => v.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-const hoje = () => new Date().toISOString().slice(0,10);
+const hoje = () => { const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); };
 
 let cfg = { url: LS.getItem('nb_url'), pin: LS.getItem('nb_pin'), quem: LS.getItem('nb_quem') };
 let mesAtual = hoje().slice(0,7);
@@ -457,7 +458,13 @@ function renderMes() {
 }
 
 /* ================= ações ================= */
-function parseValor(s){ return parseFloat(String(s).replace(/\./g,'').replace(',','.')) || 0; }
+function parseValor(s){
+  s = String(s).trim().replace(/[R$\s]/g,'');
+  if (s.includes(',')) s = s.replace(/\./g,'').replace(',','.');        // 1.234,56 → 1234.56
+  else if ((s.match(/\./g)||[]).length > 1) s = s.replace(/\./g,'');    // 1.234.567 → 1234567
+  // um único ponto sem vírgula (45.90) já é decimal válido
+  return parseFloat(s) || 0;
+}
 
 async function salvarGasto() {
   const valor = parseValor($('#gValor').value);
