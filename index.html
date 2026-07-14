@@ -22,7 +22,7 @@
 }
 *{margin:0;padding:0;box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
-body{font-family:var(--body);background:var(--paper);color:var(--ink);min-height:100dvh}
+body{font-family:var(--body);background:var(--paper);color:var(--ink);min-height:100dvh;overflow-x:clip}
 button{font-family:inherit;border:none;background:none;cursor:pointer;color:inherit}
 input,select{font-family:inherit;font-size:16px}
 .hidden{display:none!important}
@@ -80,10 +80,10 @@ h2.sec{font-family:var(--display);font-size:15px;font-weight:700;margin:18px 4px
 .sem-limite{font-size:12px;color:var(--muted);margin-top:7px;font-style:italic}
 
 /* ---------- pessoas ---------- */
-.pessoas{display:flex;gap:10px;margin-bottom:4px}
-.pessoa{flex:1;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;text-align:center}
+.pessoas{display:flex;gap:8px;margin-bottom:4px}
+.pessoa{flex:1 1 0;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 8px;text-align:center}
 .pessoa .nome{font-size:12px;font-weight:700;color:var(--muted)}
-.pessoa .val{font-family:var(--display);font-weight:700;font-size:17px;margin-top:2px}
+.pessoa .val{font-family:var(--display);font-weight:700;font-size:17px;margin-top:2px;white-space:nowrap;overflow:hidden}
 .cat[data-catlink],.pessoa[data-quemlink]{cursor:pointer;-webkit-tap-highlight-color:transparent}
 .cat[data-catlink]:active,.pessoa[data-quemlink]:active{background:var(--paper)}
 
@@ -159,7 +159,13 @@ nav button svg{width:22px;height:22px}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
 .chip{padding:9px 14px;border-radius:99px;border:1.5px solid var(--line);font-size:13px;font-weight:600;background:var(--paper)}
 .chip.on{background:var(--azul);border-color:var(--azul);color:#fff}
-.duo{display:flex;gap:10px}.duo>*{flex:1}
+.duo{display:flex;gap:10px}.duo>*{flex:1 1 0;min-width:0}
+/* iOS Safari: input[type=date] tem largura intrínseca e não encolhe no flex */
+.fld input[type="date"]{min-width:0}
+input[type="date"]::-webkit-date-and-time-value{text-align:left}
+@supports (-webkit-touch-callout:none){ /* só iOS */
+  .fld input[type="date"]{-webkit-appearance:none;appearance:none;min-height:49px}
+}
 .btn{width:100%;padding:15px;border-radius:14px;font-size:15.5px;font-weight:700;background:var(--azul);color:#fff}
 .btn:disabled{opacity:.5}
 .btn.ghost{background:var(--paper);color:var(--ink)}
@@ -456,6 +462,20 @@ function renderResumo() {
     el.onclick = () => irParaHistorico({categoria: el.dataset.catlink}));
   $('#viewResumo').querySelectorAll('[data-quemlink]').forEach(el =>
     el.onclick = () => irParaHistorico({quem: el.dataset.quemlink}));
+
+  encaixarValores();
+}
+
+// Encolhe a fonte dos valores por pessoa até caberem no card (evita scroll horizontal)
+function encaixarValores() {
+  document.querySelectorAll('.pessoa .val').forEach(el => {
+    el.style.fontSize = '';
+    let f = parseFloat(getComputedStyle(el).fontSize) || 17;
+    while (el.scrollWidth > el.clientWidth && f > 11) {
+      f -= 0.5;
+      el.style.fontSize = f + 'px';
+    }
+  });
 }
 
 function irParaHistorico(f) {
