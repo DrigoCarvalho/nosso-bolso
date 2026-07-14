@@ -84,6 +84,28 @@ h2.sec{font-family:var(--display);font-size:15px;font-weight:700;margin:18px 4px
 .pessoa{flex:1;background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;text-align:center}
 .pessoa .nome{font-size:12px;font-weight:700;color:var(--muted)}
 .pessoa .val{font-family:var(--display);font-weight:700;font-size:17px;margin-top:2px}
+.cat[data-catlink],.pessoa[data-quemlink]{cursor:pointer;-webkit-tap-highlight-color:transparent}
+.cat[data-catlink]:active,.pessoa[data-quemlink]:active{background:var(--paper)}
+
+/* ---------- carrossel de cartões ---------- */
+.carrossel{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x mandatory;
+  -webkit-overflow-scrolling:touch;scrollbar-width:none;margin-bottom:6px}
+.carrossel::-webkit-scrollbar{display:none}
+.carrossel>.balanco{flex:0 0 100%;scroll-snap-align:start;margin-bottom:0}
+.dots{display:flex;justify-content:center;gap:6px;margin:8px 0 14px}
+.dots i{width:6px;height:6px;border-radius:99px;background:var(--line);transition:background .25s}
+.dots i.on{background:var(--azul)}
+
+/* ---------- filtros do histórico ---------- */
+.filtros{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:12px;margin-bottom:10px}
+.filtros .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.filtros select{width:100%;padding:9px 10px;border:1.5px solid var(--line);border-radius:10px;
+  background:var(--paper);font-size:13px;font-weight:600;color:var(--ink)}
+.filtros select.ativo{border-color:var(--azul);background:var(--azul-soft);color:var(--azul)}
+.limpar{width:100%;margin-top:8px;padding:10px;border-radius:10px;background:var(--verm-soft);
+  color:var(--verm);font-weight:700;font-size:13px}
+.filtro-resumo{font-size:12.5px;color:var(--muted);margin:0 4px 10px}
 
 /* ---------- histórico ---------- */
 .gasto{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;
@@ -242,6 +264,7 @@ nav button svg{width:22px;height:22px}
   <div class="fld"><label>Método de pagamento</label>
     <div class="chips" id="gPag">
       <button class="chip" data-pag="Vale/Ticket">🎟️ Vale/Ticket</button>
+      <button class="chip" data-pag="Flash">⚡ Flash</button>
       <button class="chip" data-pag="Outros">Outros</button>
     </div></div>
   <button class="btn" id="gSalvar">Salvar gasto</button>
@@ -273,6 +296,7 @@ let dados = null;           // {categorias, gastos, config}
 let catSelecionada = null;
 let pagSelecionado = 'Outros';
 let editandoId = null;      // id do gasto em edição (null = novo gasto)
+let filtros = { categoria:'', quem:'', pagamento:'' };  // filtros ativos do histórico
 let snapshotPct = {};       // % por categoria antes do último lançamento (p/ alertas)
 
 // Médias por ida (análise do extrato do vale, 60 dias — mai-jul/2026).
@@ -385,7 +409,7 @@ function renderResumo() {
           ? `Ainda dá pra gastar <b class="pos">${fmt(resta)}</b>`
           : `Passou <b class="neg">${fmt(-resta)}</b> do teto`}</div>`
       : '<div class="sem-limite">Sem limite definido — ajuste em Categorias</div>';
-    return `<div class="cat">
+    return `<div class="cat" data-catlink="${c.nome}">
       <div class="cat-top"><div class="cat-nome">${c.nome} ${badge}</div>
         <div class="cat-vals"><b>${fmt(c.gasto)}</b>${c.limite>0?' / '+fmt(c.limite):''}</div></div>
       <div class="bar"><i class="${cls}" style="width:${Math.min(pct,100)}%"></i></div>
@@ -393,7 +417,7 @@ function renderResumo() {
   }).join('');
 
   const pessoas = ['Casal','Rodrigo','Laura'].map(p =>
-    `<div class="pessoa"><div class="nome">${p}</div><div class="val">${fmt(r.porPessoa[p]||0)}</div></div>`).join('');
+    `<div class="pessoa" data-quemlink="${p}"><div class="nome">${p}</div><div class="val">${fmt(r.porPessoa[p]||0)}</div></div>`).join('');
 
   $('#viewResumo').innerHTML = `
     <div class="balanco">
@@ -407,13 +431,38 @@ function renderResumo() {
       <div class="gangorra-legenda"><span>← estouros ${fmt(a.estouro)}</span><span>sobras ${fmt(a.sobra)} →</span></div>
       <div class="analise">${a.frase}</div>
     </div>
-    ${renderTicketCard()}
+    <h2 class="sec">Cartões</h2>
+    <div class="carrossel" id="carCartoes">${renderTicketCard()}${renderFlashCard()}</div>
+    <div class="dots" id="dotsCartoes"><i class="on"></i><i></i></div>
     <div class="pessoas">${pessoas}</div>
     <h2 class="sec">Categorias</h2>
     ${catsHtml || '<div class="vazio">Nenhuma categoria ativa.</div>'}`;
 
   const btnST = $('#btnSaldoTicket');
-  if (btnST) btnST.onclick = editarSaldoTicket;
+  if (btnST) btnST.onclick = () => editarSaldoCartao('ticketSaldo', 'dos tickets');
+  const btnSF = $('#btnSaldoFlash');
+  if (btnSF) btnSF.onclick = () => editarSaldoCartao('flashSaldo', 'do Flash');
+
+  // dots acompanham o deslize do carrossel
+  const car = $('#carCartoes');
+  if (car) car.addEventListener('scroll', () => {
+    const passo = car.clientWidth + 10; // largura do card + gap
+    const i = Math.round(car.scrollLeft / passo);
+    document.querySelectorAll('#dotsCartoes i').forEach((d,k) => d.classList.toggle('on', k===i));
+  }, {passive:true});
+
+  // cards de categoria e pessoa levam ao histórico já filtrado
+  $('#viewResumo').querySelectorAll('[data-catlink]').forEach(el =>
+    el.onclick = () => irParaHistorico({categoria: el.dataset.catlink}));
+  $('#viewResumo').querySelectorAll('[data-quemlink]').forEach(el =>
+    el.onclick = () => irParaHistorico({quem: el.dataset.quemlink}));
+}
+
+function irParaHistorico(f) {
+  filtros = { categoria:'', quem:'', pagamento:'', ...f };
+  trocarTab('Historico');
+  renderHistorico();
+  window.scrollTo({top:0, behavior:'instant'});
 }
 
 function renderTicketCard() {
@@ -452,37 +501,122 @@ function renderTicketCard() {
   </div>`;
 }
 
-async function editarSaldoTicket() {
-  const atual = Number((dados.config||{}).ticketSaldo) || 0;
-  const novo = prompt('Novo saldo total dos tickets (R$):',
+function renderFlashCard() {
+  const config = dados.config || {};
+  const saldo = Number(config.flashSaldo) || 0;
+  const gastoFlash = dados.gastos.filter(g => g.pagamento === 'Flash')
+    .reduce((s,g) => s + g.valor, 0);
+  const restante = saldo - gastoFlash;
+  const pct = saldo > 0 ? Math.min((gastoFlash/saldo)*100, 100) : 0;
+  const cls = restante < 0 ? 'w100' : pct >= 80 ? 'w80' : 'ok';
+  const rodape = saldo === 0
+    ? '<div class="analise" style="margin-top:10px">Toque em <b>editar saldo</b> para definir o saldo total do Flash.</div>'
+    : restante < 0
+    ? `<div class="analise" style="margin-top:10px">O Flash do mês acabou — <b class="verm">${fmt(-restante)}</b> já saíram além do saldo.</div>`
+    : '';
+
+  return `<div class="balanco">
+    <div class="cat-top">
+      <div class="eyebrow">⚡ Saldo do Flash</div>
+      <button id="btnSaldoFlash" style="font-size:12px;font-weight:700;color:var(--azul)">editar saldo ✏️</button>
+    </div>
+    <div class="verdict ${restante>=0?'azul':'verm'}" style="font-size:24px">${fmt(Math.max(restante,0))} ${restante>=0?'disponíveis':''}</div>
+    <div class="sub">${fmt(gastoFlash)} usados de ${fmt(saldo)}</div>
+    <div class="bar" style="margin-top:12px"><i class="${cls}" style="width:${pct}%"></i></div>
+    ${rodape}
+  </div>`;
+}
+
+async function editarSaldoCartao(chave, nomeCartao) {
+  const atual = Number((dados.config||{})[chave]) || 0;
+  const novo = prompt(`Novo saldo total ${nomeCartao} (R$):`,
     atual.toLocaleString('pt-BR',{minimumFractionDigits:2}));
   if (novo === null) return;
   const v = parseValor(novo);
   if (v < 0) return toast('Valor inválido','warn');
   try {
-    await api({action:'setConfig', chave:'ticketSaldo', valor:v});
-    toast('Saldo dos tickets atualizado para '+fmt(v));
+    await api({action:'setConfig', chave, valor:v});
+    toast(`Saldo ${nomeCartao} atualizado para `+fmt(v));
     await carregar({silent:true});
   } catch(e){ toast(e.message,'bad'); }
 }
 
+function opcoesMes() {
+  // últimos 13 meses (incluindo o atual) + o mês em visualização, se for outro
+  const set = new Set([mesAtual]);
+  const d = new Date();
+  for (let i = 0; i < 13; i++) {
+    set.add(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'));
+    d.setMonth(d.getMonth()-1);
+  }
+  return [...set].sort().reverse();
+}
+
 function renderHistorico() {
+  const catsFiltro = [...new Set([
+    ...dados.categorias.filter(c=>!c.arquivada).map(c=>c.nome),
+    ...dados.gastos.map(g=>g.categoria)
+  ])].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+
+  const temFiltro = !!(filtros.categoria || filtros.quem || filtros.pagamento);
+  const gastos = dados.gastos.filter(g =>
+    (!filtros.categoria || g.categoria === filtros.categoria) &&
+    (!filtros.quem      || g.quem === filtros.quem) &&
+    (!filtros.pagamento || (g.pagamento || 'Outros') === filtros.pagamento));
+
+  const opts = (lista, sel, placeholder) =>
+    `<option value="">${placeholder}</option>` +
+    lista.map(o => `<option value="${o}" ${o===sel?'selected':''}>${o}</option>`).join('');
+
+  const mesesHtml = opcoesMes().map(m => {
+    const [y,mo] = m.split('-');
+    const lbl = new Date(y, mo-1, 1).toLocaleDateString('pt-BR',{month:'short',year:'numeric'});
+    return `<option value="${m}" ${m===mesAtual?'selected':''}>${lbl}</option>`;
+  }).join('');
+
+  const filtrosHtml = `<div class="filtros">
+    <div class="grid">
+      <select id="fMes" aria-label="Filtrar por mês">${mesesHtml}</select>
+      <select id="fCat" aria-label="Filtrar por categoria" class="${filtros.categoria?'ativo':''}">${opts(catsFiltro, filtros.categoria, 'Todas as categorias')}</select>
+      <select id="fQuem" aria-label="Filtrar por quem gastou" class="${filtros.quem?'ativo':''}">${opts(['Casal','Rodrigo','Laura'], filtros.quem, 'Quem: todos')}</select>
+      <select id="fPag" aria-label="Filtrar por pagamento" class="${filtros.pagamento?'ativo':''}">${opts(['Vale/Ticket','Flash','Outros'], filtros.pagamento, 'Pagamento: todos')}</select>
+    </div>
+    ${temFiltro ? '<button class="limpar" id="fLimpar">✕ Limpar filtros</button>' : ''}
+  </div>
+  ${temFiltro ? `<div class="filtro-resumo">${gastos.length} ${gastos.length===1?'gasto encontrado':'gastos encontrados'} · total de <b>${fmt(gastos.reduce((s,g)=>s+g.valor,0))}</b></div>` : ''}`;
+
   const porDia = {};
-  dados.gastos.forEach(g => (porDia[g.data] = porDia[g.data]||[]).push(g));
+  gastos.forEach(g => (porDia[g.data] = porDia[g.data]||[]).push(g));
   const dias = Object.keys(porDia).sort().reverse();
-  $('#viewHistorico').innerHTML = dias.length ? dias.map(d => {
+  const listaHtml = dias.length ? dias.map(d => {
     const dt = new Date(d+'T12:00');
     const lbl = dt.toLocaleDateString('pt-BR',{weekday:'short',day:'2-digit',month:'short'});
     return `<h2 class="sec" style="text-transform:capitalize">${lbl}</h2>` + porDia[d].map(g => `
       <div class="gasto">
         <div class="quem-dot ${g.quem==='Rodrigo'?'dot-a':g.quem==='Laura'?'dot-b':'dot-c'}">${(g.quem||'?')[0]}</div>
         <div class="info" data-edit="${g.id}" style="cursor:pointer">
-          <div class="l1">${g.pagamento==='Vale/Ticket'?'🎟️ ':''}${g.categoria}</div>
+          <div class="l1">${g.pagamento==='Vale/Ticket'?'🎟️ ':g.pagamento==='Flash'?'⚡ ':''}${g.categoria}</div>
           <div class="l2">${g.descricao || g.quem}</div></div>
         <div class="valor">${fmt(g.valor)}</div>
         <button class="del" data-del="${g.id}" aria-label="Excluir">✕</button>
       </div>`).join('');
-  }).join('') : '<div class="vazio">Nenhum gasto neste mês.<br>Toque no <b>+</b> para registrar o primeiro.</div>';
+  }).join('') : `<div class="vazio">${temFiltro
+      ? 'Nenhum gasto com esses filtros neste mês.'
+      : 'Nenhum gasto neste mês.<br>Toque no <b>+</b> para registrar o primeiro.'}</div>`;
+
+  $('#viewHistorico').innerHTML = filtrosHtml + listaHtml;
+
+  $('#fMes').onchange = e => { mesAtual = e.target.value; renderMes(); carregar(); };
+  $('#fCat').onchange = e => { filtros.categoria = e.target.value; renderHistorico(); };
+  $('#fQuem').onchange = e => { filtros.quem = e.target.value; renderHistorico(); };
+  $('#fPag').onchange = e => { filtros.pagamento = e.target.value; renderHistorico(); };
+  const btnLimpar = $('#fLimpar');
+  if (btnLimpar) btnLimpar.onclick = () => {
+    filtros = { categoria:'', quem:'', pagamento:'' };
+    const mesHoje = hoje().slice(0,7);
+    if (mesAtual !== mesHoje) { mesAtual = mesHoje; renderMes(); carregar(); }
+    else renderHistorico();
+  };
 
   $('#viewHistorico').querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
     if (!confirm('Excluir este gasto?')) return;
