@@ -1,4 +1,4 @@
-const CACHE = 'nosso-bolso-v6';
+const CACHE = 'nosso-bolso-v7';
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
